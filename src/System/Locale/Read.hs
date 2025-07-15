@@ -26,6 +26,7 @@ import           Data.List (isPrefixOf)
 data LocaleParseException
   = LocaleParseException String
   | LocaleUtf8Exception Text.UnicodeException
+  | LocaleStdoutException
   | LocaleExitException ExitCode
   deriving (Show,Eq,Typeable)
 
@@ -66,13 +67,15 @@ getLocale :: Maybe String -> IO TimeLocale
 getLocale localeName = do
   process <- getLocaleProcess localeName
   output <- withCreateProcess process $
-    \_stdin (Just stdout) _stderr ph -> do
-      bsOutput <- BS.hGetContents stdout
-      exitCode <- waitForProcess ph
-      case exitCode of
-        ExitSuccess       -> return ()
-        e@(ExitFailure _) -> throwIO $ LocaleExitException e
-      either (throwIO . LocaleUtf8Exception) return $ Text.decodeUtf8' bsOutput
+    \_stdin mStdout _stderr ph -> case mStdout of
+      Just stdout -> do
+        bsOutput <- BS.hGetContents stdout
+        exitCode <- waitForProcess ph
+        case exitCode of
+          ExitSuccess       -> return ()
+          e@(ExitFailure _) -> throwIO $ LocaleExitException e
+        either (throwIO . LocaleUtf8Exception) return $ Text.decodeUtf8' bsOutput
+      Nothing -> throwIO LocaleStdoutException
   case parseOnly (parseLocale <* endOfInput) output of
     Left err -> throwIO (LocaleParseException err)
     Right locale -> pure locale
